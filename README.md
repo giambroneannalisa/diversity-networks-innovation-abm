@@ -1,8 +1,6 @@
 # Urban Innovation ABM — replication package
 
-<!-- DOI badge: added after the first Zenodo release
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
--->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21562685.svg)](https://doi.org/10.5281/zenodo.21562685)
 
 Replication package for the Ph.D. thesis:
 
@@ -128,8 +126,11 @@ to the thesis as defended.
 ## How to cite
 
 See `CITATION.cff` (GitHub renders a "Cite this repository" button).
-Cite the thesis for the scientific content and the version DOI of this
-package for the artifacts.
+Cite the thesis for the scientific content and this package's DOI for
+the artifacts: all-versions DOI
+[10.5281/zenodo.21562685](https://doi.org/10.5281/zenodo.21562685)
+(always resolves to the latest version; the v1.0.0 version DOI shown on
+the Zenodo record identifies the thesis-as-defended snapshot).
 
 ## Licenses
 
