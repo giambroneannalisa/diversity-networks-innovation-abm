@@ -127,10 +127,11 @@ to the thesis as defended.
 
 See `CITATION.cff` (GitHub renders a "Cite this repository" button).
 Cite the thesis for the scientific content and this package's DOI for
-the artifacts: all-versions DOI
+the artifacts: version DOI
+[10.5281/zenodo.21562686](https://doi.org/10.5281/zenodo.21562686)
+for the v1.0.0 thesis-as-defended snapshot, or all-versions DOI
 [10.5281/zenodo.21562685](https://doi.org/10.5281/zenodo.21562685)
-(always resolves to the latest version; the v1.0.0 version DOI shown on
-the Zenodo record identifies the thesis-as-defended snapshot).
+(always resolves to the latest version).
 
 ## Licenses
 
