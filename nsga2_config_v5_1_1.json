@@ -1,0 +1,15 @@
+{
+  "NETLOGO_PATH": "/Applications/NetLogo 6.3.0/netlogo-headless.sh",
+  "MODEL_PATH": "Urban_Innovation_Model_v5.1.nlogo",
+  "N_REPLICATES": 3,
+  "MAX_TICKS": 300,
+  "POP_SIZE": 50,
+  "N_GENERATIONS": 50,
+  "PARAM_BOUNDS": {
+    "bridging-capital-weight": [0.0, 1.0],
+    "innovation-diffusion-rate": [0.0, 0.2],
+    "policy-effectiveness": [0.0, 1.0],
+    "cultural-diffusion-rate": [0.0, 0.5]
+  },
+  "output_prefix": "results_v5_1"
+}

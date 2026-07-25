@@ -1,0 +1,25 @@
+{
+  "upload_type": "software",
+  "title": "Urban Innovation ABM — replication package for \"Cultural diversity, networks, and innovation in cities\"",
+  "creators": [
+    {
+      "name": "Giambrone, Annalisa",
+      "orcid": "0009-0003-5189-8885",
+      "affiliation": "University of Enna \"Kore\""
+    }
+  ],
+  "description": "<p>Replication package for the Ph.D. thesis <em>Cultural diversity, networks, and innovation in cities: an agent-based model of co-evolutionary processes</em> (University of Enna \"Kore\", defended 15 July 2026; supervisor: Prof. Raffaele Scuderi).</p><p>The package contains: the NetLogo 6.3.0 agent-based model (v5.1 specification) integrating 200 households, 20 firms, 5 universities and 5 institutions, with cultural diffusion, social and economic networks (Watts&ndash;Strogatz, Barab&aacute;si&ndash;Albert) and a knowledge production function in which cultural diversity carries the highest elasticity (&gamma; = 0.35); the NSGA-II driver (pymoo) optimising four policy levers &mdash; cultural-diffusion rate, bridging-capital weight, innovation-diffusion rate, policy effectiveness &mdash; against three objectives (innovation, cultural diversity, income Gini); the experiment configuration; and the complete output data of the three thesis runs (seeds 42, 123, 456; 4,860 simulation evaluations): three final Pareto fronts and three full evolutionary trajectories.</p><p>The README documents the verified analysis conventions needed to reproduce the thesis statistics from the archived data (Pearson correlations, CDR regime partition, knee-point identification), the reproducibility scope (statistical for the original runs; a deterministic v2 driver is included for bit-for-bit reproducible future runs), and three cosmetic errata found during independent recomputation, none affecting any conclusion.</p><p>Code is released under the MIT License; data under CC-BY-4.0.</p>",
+  "keywords": [
+    "agent-based modeling",
+    "NetLogo",
+    "NSGA-II",
+    "multi-objective optimization",
+    "cultural diversity",
+    "innovation",
+    "inequality",
+    "urban economics",
+    "replication package"
+  ],
+  "license": "mit",
+  "notes": "Version 1.0.0 archives the replication package exactly as it corresponds to the thesis as defended (15 July 2026). Later versions may add post-defence extensions (additional seeds, counterfactual experiments); cite the version DOI appropriate to what you use."
+}

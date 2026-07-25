@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+message: >-
+  If you use this replication package (model, drivers, or data), please
+  cite it using the metadata below, and cite the thesis it accompanies
+  (see preferred-citation).
+type: software
+title: >-
+  Urban Innovation ABM — replication package for "Cultural diversity,
+  networks, and innovation in cities"
+version: 1.0.0
+date-released: "2026-07-25"
+authors:
+  - family-names: Giambrone
+    given-names: Annalisa
+    orcid: "https://orcid.org/0009-0003-5189-8885"
+    affiliation: "University of Enna \"Kore\""
+keywords:
+  - agent-based modeling
+  - NetLogo
+  - NSGA-II
+  - multi-objective optimization
+  - cultural diversity
+  - innovation
+  - urban economics
+  - replication package
+license: MIT
+preferred-citation:
+  type: thesis
+  title: >-
+    Cultural diversity, networks, and innovation in cities: an
+    agent-based model of co-evolutionary processes
+  authors:
+    - family-names: Giambrone
+      given-names: Annalisa
+      orcid: "https://orcid.org/0009-0003-5189-8885"
+      affiliation: "University of Enna \"Kore\""
+  institution:
+    name: "University of Enna \"Kore\""
+  year: 2026
+  notes: >-
+    Ph.D. thesis, defended 15 July 2026. Supervisor: Prof. Raffaele
+    Scuderi.

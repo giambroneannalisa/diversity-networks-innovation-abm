@@ -1,0 +1,66 @@
+name: NSGA-II 10-seed experiment
+
+# Manual trigger only: run from the Actions tab ("Run workflow").
+# Each seed runs as an independent matrix job on a hosted runner.
+# Results are uploaded as artifacts (NOT committed to the repository),
+# so release v1.0.0 stays the thesis-as-defended archive.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  nsga2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350   # hosted-runner hard cap is 360
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [42, 123, 456, 789, 1234, 2345, 3456, 4567, 5678, 6789]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache NetLogo 6.3.0
+        id: netlogo-cache
+        uses: actions/cache@v4
+        with:
+          path: netlogo
+          key: netlogo-6.3.0-64
+
+      - name: Install NetLogo 6.3.0
+        if: steps.netlogo-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL -o /tmp/netlogo.tgz "https://ccl.northwestern.edu/netlogo/6.3.0/NetLogo-6.3.0-64.tgz"
+          mkdir -p netlogo
+          tar xzf /tmp/netlogo.tgz -C netlogo --strip-components=1
+
+      - name: Install Python dependencies
+        run: pip install "pymoo==0.6.*" pandas numpy
+
+      - name: Point config at the runner's NetLogo
+        run: |
+          python3 - <<'EOF'
+          import json
+          c = json.load(open('nsga2_config_v5_1_1.json'))
+          c['NETLOGO_PATH'] = './netlogo/netlogo-headless.sh'
+          json.dump(c, open('config_ci.json', 'w'), indent=2)
+          EOF
+
+      - name: Run seed ${{ matrix.seed }}
+        run: python3 run_trajectory_v2.py config_ci.json --seed ${{ matrix.seed }}
+
+      - name: Upload results
+        if: always()   # a timed-out job still uploads its last checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-seed-${{ matrix.seed }}
+          path: |
+            trajectory_seed${{ matrix.seed }}.csv
+            trajectory_seed${{ matrix.seed }}_checkpoint.csv
+            pareto_seed${{ matrix.seed }}.csv
+            replicates_seed${{ matrix.seed }}.csv
+          if-no-files-found: warn
+          retention-days: 90

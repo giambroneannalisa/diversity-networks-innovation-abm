@@ -1,0 +1,20 @@
+License for the data files (data/ directory)
+=============================================
+
+The simulation output data in the data/ directory (Pareto fronts,
+evolutionary trajectories, checkpoints) is licensed under the Creative
+Commons Attribution 4.0 International License (CC BY 4.0).
+
+You are free to share and adapt this data for any purpose, including
+commercially, provided you give appropriate credit to the author:
+
+  Annalisa Giambrone (ORCID: 0009-0003-5189-8885), "Urban Innovation
+  ABM — replication package", and the accompanying Ph.D. thesis
+  "Cultural diversity, networks, and innovation in cities: an
+  agent-based model of co-evolutionary processes", University of Enna
+  "Kore", 2026.
+
+Full license text: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Everything outside the data/ directory (model, drivers, scripts,
+documentation) is licensed under the MIT License — see LICENSE.
