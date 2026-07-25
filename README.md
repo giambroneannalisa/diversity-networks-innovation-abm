@@ -1,4 +1,4 @@
-# Urban Innovation ABM — replication package
+# Cultural diversity, networks, and innovation in cities — replication package
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21562685.svg)](https://doi.org/10.5281/zenodo.21562685)
 
