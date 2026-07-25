@@ -33,9 +33,25 @@ jobs:
       - name: Install NetLogo 6.3.0
         if: steps.netlogo-cache.outputs.cache-hit != 'true'
         run: |
-          curl -sSL -o /tmp/netlogo.tgz "https://ccl.northwestern.edu/netlogo/6.3.0/NetLogo-6.3.0-64.tgz"
+          set -e
+          # downloads.netlogo.org is the current canonical host; the old
+          # ccl.northwestern.edu path now serves an HTML page, not the tarball.
+          for url in \
+            "https://downloads.netlogo.org/6.3.0/NetLogo-6.3.0-64.tgz" \
+            "https://ccl.northwestern.edu/netlogo/6.3.0/NetLogo-6.3.0-64.tgz"; do
+            echo "Trying $url"
+            if curl -fsSL -o /tmp/netlogo.tgz "$url" && file /tmp/netlogo.tgz | grep -q 'gzip compressed'; then
+              echo "Downloaded valid archive from $url"
+              break
+            fi
+            echo "::warning::$url did not yield a gzip archive"
+            file /tmp/netlogo.tgz || true
+            rm -f /tmp/netlogo.tgz
+          done
+          test -s /tmp/netlogo.tgz || { echo "::error::NetLogo download failed from all mirrors"; exit 1; }
           mkdir -p netlogo
           tar xzf /tmp/netlogo.tgz -C netlogo --strip-components=1
+          test -x netlogo/netlogo-headless.sh || { echo "::error::netlogo-headless.sh missing after extraction"; ls -la netlogo; exit 1; }
 
       - name: Install Python dependencies
         run: pip install "pymoo==0.6.*" pandas numpy
