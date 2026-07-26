@@ -1,0 +1,89 @@
+name: Export extension fronts
+
+# Prints the extension Pareto fronts verbatim to the job log, with md5
+# checksums, so they can be recovered exactly where artifact download is
+# not possible. Also derives the non-dominated front at the last completed
+# generation for seeds whose run hit the time limit (clearly labelled).
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Workflow run ID whose artifacts to export'
+        required: true
+        default: '30167710986'
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download result artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: results-seed-*
+          path: extension
+          merge-multiple: true
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export complete Pareto fronts verbatim
+        run: |
+          python3 - <<'EOF'
+          import glob, hashlib, os, re
+          for p in sorted(glob.glob('extension/pareto_seed*.csv'),
+                          key=lambda q: int(re.search(r'seed(\d+)', q).group(1))):
+              raw = open(p, 'rb').read()
+              print(f"----- BEGIN {os.path.basename(p)} md5={hashlib.md5(raw).hexdigest()} "
+                    f"bytes={len(raw)} -----")
+              print(raw.decode().rstrip('\n'))
+              print(f"----- END {os.path.basename(p)} -----")
+          EOF
+
+      - name: Derive and export fronts from timed-out seeds' checkpoints
+        run: |
+          python3 - <<'EOF'
+          import csv, glob, hashlib, io, os, re
+          COLS = ['bridging-capital-weight', 'innovation-diffusion-rate',
+                  'policy-effectiveness', 'cultural-diffusion-rate',
+                  'Obj_Innov_Neg', 'Obj_Div_Neg', 'Obj_Gini']
+
+          def dominates(a, b):
+              # all objectives minimised in stored convention
+              o = ('Obj_Innov_Neg', 'Obj_Div_Neg', 'Obj_Gini')
+              return all(float(a[k]) <= float(b[k]) for k in o) and \
+                     any(float(a[k]) <  float(b[k]) for k in o)
+
+          for p in sorted(glob.glob('extension/trajectory_seed*_checkpoint.csv'),
+                          key=lambda q: int(re.search(r'seed(\d+)', q).group(1))):
+              s = int(re.search(r'seed(\d+)', p).group(1))
+              if os.path.exists(f'extension/pareto_seed{s}.csv'):
+                  continue                      # run completed; front already exported
+              with open(p) as f:
+                  rows = [r for r in csv.DictReader(f) if r.get('Obj_Gini')]
+              last = max(int(r['Generation']) for r in rows)
+              pop = [r for r in rows if int(r['Generation']) == last]
+              front = [a for a in pop if not any(dominates(b, a) for b in pop if b is not a)]
+              # de-duplicate identical parameter vectors
+              seen, uniq = set(), []
+              for r in front:
+                  k = tuple(r[c] for c in COLS)
+                  if k not in seen:
+                      seen.add(k); uniq.append(r)
+              buf = io.StringIO()
+              w = csv.writer(buf, lineterminator='\n')
+              w.writerow(COLS)
+              for r in uniq:
+                  w.writerow([r[c] for c in COLS])
+              raw = buf.getvalue().encode()
+              name = f'pareto_seed{s}_gen{last}_partial.csv'
+              print(f"----- BEGIN {name} md5={hashlib.md5(raw).hexdigest()} "
+                    f"bytes={len(raw)} derived_from_generation={last} solutions={len(uniq)} -----")
+              print(raw.decode().rstrip('\n'))
+              print(f"----- END {name} -----")
+          EOF
