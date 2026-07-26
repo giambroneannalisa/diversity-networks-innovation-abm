@@ -16,9 +16,24 @@ on:
         description: 'Workflow run ID whose artifacts to export'
         required: true
         default: '30167710986'
+      mode:
+        description: 'export = publish the branch; cleanup = delete it again'
+        required: true
+        default: 'export'
+        type: choice
+        options: [export, cleanup]
 
 jobs:
+  cleanup:
+    if: inputs.mode == 'cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete the extension-fronts branch
+        run: git push origin --delete extension-fronts || echo "already gone"
+
   export:
+    if: inputs.mode == 'export'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
