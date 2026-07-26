@@ -84,8 +84,14 @@ jobs:
                     f"MATCH={logged == expected}")
           EOF
 
-      - name: Cross-seed analysis
+      - name: Cross-seed analysis (extension only)
         if: always()
         run: |
           echo "=== analyze_fronts.py over all available Pareto fronts ==="
           python3 analyze_fronts.py extension
+
+      - name: Pooled comparison, thesis vs extension
+        if: always()
+        run: |
+          echo "=== compare_seeds.py: archived thesis fronts vs extension fronts ==="
+          python3 compare_seeds.py data extension
