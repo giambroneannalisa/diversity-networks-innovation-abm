@@ -87,3 +87,42 @@ jobs:
               print(raw.decode().rstrip('\n'))
               print(f"----- END {name} -----")
           EOF
+
+      - name: Pack all fronts as base64 (compact recovery channel)
+        run: |
+          mkdir -p pack
+          cp extension/pareto_seed*.csv pack/ 2>/dev/null || true
+          python3 - <<'EOF'
+          import csv, glob, io, os, re
+          COLS = ['bridging-capital-weight', 'innovation-diffusion-rate',
+                  'policy-effectiveness', 'cultural-diffusion-rate',
+                  'Obj_Innov_Neg', 'Obj_Div_Neg', 'Obj_Gini']
+          def dominates(a, b):
+              o = ('Obj_Innov_Neg', 'Obj_Div_Neg', 'Obj_Gini')
+              return all(float(a[k]) <= float(b[k]) for k in o) and \
+                     any(float(a[k]) <  float(b[k]) for k in o)
+          for p in glob.glob('extension/trajectory_seed*_checkpoint.csv'):
+              s = int(re.search(r'seed(\d+)', p).group(1))
+              if os.path.exists(f'extension/pareto_seed{s}.csv'):
+                  continue
+              rows = [r for r in csv.DictReader(open(p)) if r.get('Obj_Gini')]
+              last = max(int(r['Generation']) for r in rows)
+              pop = [r for r in rows if int(r['Generation']) == last]
+              front = [a for a in pop if not any(dominates(b, a) for b in pop if b is not a)]
+              seen, uniq = set(), []
+              for r in front:
+                  k = tuple(r[c] for c in COLS)
+                  if k not in seen:
+                      seen.add(k); uniq.append(r)
+              with open(f'pack/pareto_seed{s}_gen{last}_partial.csv', 'w', newline='') as f:
+                  w = csv.writer(f, lineterminator='\n')
+                  w.writerow(COLS)
+                  for r in uniq:
+                      w.writerow([r[c] for c in COLS])
+          EOF
+          ls -la pack/
+          tar czf fronts.tar.gz -C pack .
+          echo "TARBALL md5=$(md5sum fronts.tar.gz | cut -d' ' -f1) bytes=$(stat -c%s fronts.tar.gz)"
+          echo "----- BEGIN BASE64 fronts.tar.gz -----"
+          base64 -w 100 fronts.tar.gz
+          echo "----- END BASE64 -----"
