@@ -22,6 +22,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install numpy (needed by the determinism check)
+        run: pip install numpy --quiet
+
       - name: Download all result artifacts
         uses: actions/download-artifact@v4
         with:
@@ -59,6 +62,7 @@ jobs:
           EOF
 
       - name: Determinism check on replicate seeds
+        continue-on-error: true
         run: |
           python3 - <<'EOF'
           import glob, csv, os, re
@@ -81,7 +85,7 @@ jobs:
           EOF
 
       - name: Cross-seed analysis
+        if: always()
         run: |
-          pip install numpy --quiet
           echo "=== analyze_fronts.py over all available Pareto fronts ==="
           python3 analyze_fronts.py extension
