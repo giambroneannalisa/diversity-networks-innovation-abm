@@ -17,11 +17,11 @@ on:
         required: true
         default: '30167710986'
       mode:
-        description: 'export = publish the branch; cleanup = delete it again'
+        description: 'export = fronts only; export-all = every artifact file; cleanup = delete the branch'
         required: true
         default: 'export'
         type: choice
-        options: [export, cleanup]
+        options: [export, export-all, cleanup]
 
 jobs:
   cleanup:
@@ -31,6 +31,40 @@ jobs:
       - uses: actions/checkout@v4
       - name: Delete the extension-fronts branch
         run: git push origin --delete extension-fronts || echo "already gone"
+
+  export-all:
+    if: inputs.mode == 'export-all'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download result artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: results-seed-*
+          path: extension
+          merge-multiple: true
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push every artifact file to the extension-fronts branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== inventory and checksums (compare after fetch) ==="
+          ls -la extension/
+          md5sum extension/* | sort -k2
+          mkdir -p /tmp/side && cp extension/* /tmp/side/
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan extension-fronts
+          git rm -rf --cached . >/dev/null
+          find . -maxdepth 1 -mindepth 1 ! -name .git -exec rm -rf {} +
+          cp /tmp/side/* .
+          git add -A
+          git commit -m "Full artifact contents of run ${{ inputs.run_id }}"
+          git push -f origin extension-fronts
+          echo "pushed:"; git show --stat --oneline HEAD | head -20
 
   export:
     if: inputs.mode == 'export'
