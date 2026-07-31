@@ -1,0 +1,155 @@
+name: Morris screening
+
+# Global sensitivity screening (Morris elementary effects) of the ten
+# structural parameters of the SA model variant, with the four policy
+# decision variables held at a reference point.
+#
+# Job 1 (equivalence) proves the SA variant is faithful: with no SA
+# parameter set, v5.2-SA must produce BIT-IDENTICAL BehaviorSpace output
+# to v5.1 under the same seed. The screening only runs if it does.
+
+on:
+  workflow_dispatch:
+    inputs:
+      trajectories:
+        description: 'Morris trajectories r (points = r * 11)'
+        required: true
+        default: '20'
+      reference:
+        description: 'Policy reference point for the four decision variables'
+        required: true
+        default: 'knee'
+        type: choice
+        options: [knee, high-cdr]
+      sa_seed:
+        description: 'Master seed of the whole screening (design + replicates)'
+        required: true
+        default: '20260731'
+
+jobs:
+  equivalence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache NetLogo 6.3.0
+        id: netlogo-cache
+        uses: actions/cache@v4
+        with:
+          path: netlogo
+          key: netlogo-6.3.0-64
+
+      - name: Install NetLogo 6.3.0
+        if: steps.netlogo-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          for url in \
+            "https://downloads.netlogo.org/6.3.0/NetLogo-6.3.0-64.tgz" \
+            "https://ccl.northwestern.edu/netlogo/6.3.0/NetLogo-6.3.0-64.tgz"; do
+            echo "Trying $url"
+            if curl -fsSL -o /tmp/netlogo.tgz "$url" && file /tmp/netlogo.tgz | grep -q 'gzip compressed'; then
+              break
+            fi
+            rm -f /tmp/netlogo.tgz
+          done
+          test -s /tmp/netlogo.tgz || { echo "::error::NetLogo download failed"; exit 1; }
+          mkdir -p netlogo && tar xzf /tmp/netlogo.tgz -C netlogo --strip-components=1
+
+      - name: v5.1 vs v5.2-SA at defaults must be bit-identical
+        run: |
+          set -e
+          cat > equiv.xml <<'EOF'
+          <experiments>
+            <experiment name="equiv" repetitions="1" runMetricsEveryStep="false">
+              <setup>setup</setup>
+              <go>go</go>
+              <timeLimit steps="300"/>
+              <metric>total-innovation-output</metric>
+              <metric>cultural-diversity-index</metric>
+              <metric>gini-coefficient</metric>
+              <enumeratedValueSet variable="random-seed"><value value="42"/></enumeratedValueSet>
+              <enumeratedValueSet variable="cultural-diffusion-rate"><value value="0.003"/></enumeratedValueSet>
+              <enumeratedValueSet variable="bridging-capital-weight"><value value="0.41"/></enumeratedValueSet>
+              <enumeratedValueSet variable="innovation-diffusion-rate"><value value="0.09"/></enumeratedValueSet>
+              <enumeratedValueSet variable="policy-effectiveness"><value value="0.72"/></enumeratedValueSet>
+            </experiment>
+          </experiments>
+          EOF
+          ./netlogo/netlogo-headless.sh --model Urban_Innovation_Model_v5.1.nlogo \
+            --setup-file equiv.xml --table out_v51.csv
+          ./netlogo/netlogo-headless.sh --model Urban_Innovation_Model_v5.2-SA.nlogo \
+            --setup-file equiv.xml --table out_v52.csv
+          echo "--- v5.1 ---";  tail -n +7 out_v51.csv
+          echo "--- v5.2-SA ---"; tail -n +7 out_v52.csv
+          if diff <(tail -n +7 out_v51.csv) <(tail -n +7 out_v52.csv); then
+            echo "EQUIVALENCE OK: v5.2-SA at defaults is bit-identical to v5.1"
+          else
+            echo "::error::v5.2-SA diverges from v5.1 at default parameters"
+            exit 1
+          fi
+
+  morris:
+    needs: equivalence
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache NetLogo 6.3.0
+        id: netlogo-cache
+        uses: actions/cache@v4
+        with:
+          path: netlogo
+          key: netlogo-6.3.0-64
+
+      - name: Install NetLogo 6.3.0
+        if: steps.netlogo-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          for url in \
+            "https://downloads.netlogo.org/6.3.0/NetLogo-6.3.0-64.tgz" \
+            "https://ccl.northwestern.edu/netlogo/6.3.0/NetLogo-6.3.0-64.tgz"; do
+            if curl -fsSL -o /tmp/netlogo.tgz "$url" && file /tmp/netlogo.tgz | grep -q 'gzip compressed'; then
+              break
+            fi
+            rm -f /tmp/netlogo.tgz
+          done
+          test -s /tmp/netlogo.tgz || { echo "::error::NetLogo download failed"; exit 1; }
+          mkdir -p netlogo && tar xzf /tmp/netlogo.tgz -C netlogo --strip-components=1
+
+      - name: Install numpy
+        run: pip install numpy
+
+      - name: Point config at the runner's NetLogo
+        run: |
+          python3 - <<'EOF'
+          import json
+          c = json.load(open('nsga2_config_v5_1_1.json'))
+          c['NETLOGO_PATH'] = './netlogo/netlogo-headless.sh'
+          json.dump(c, open('config_ci.json', 'w'), indent=2)
+          EOF
+
+      - name: Run Morris screening
+        run: |
+          python3 run_morris.py config_ci.json \
+            --r ${{ inputs.trajectories }} \
+            --sa-seed ${{ inputs.sa_seed }} \
+            --reference ${{ inputs.reference }} \
+            --out morris_points.csv
+
+      - name: Elementary effects (mu*, mu, sigma)
+        if: always()
+        run: python3 analyze_morris.py morris_points.csv
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: morris-results-${{ inputs.reference }}-r${{ inputs.trajectories }}
+          path: morris_points.csv
+          retention-days: 90
