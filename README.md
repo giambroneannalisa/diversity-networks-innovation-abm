@@ -33,6 +33,9 @@ reproduce the thesis statistics from the archived data.
 ## How to reproduce the thesis experiment
 
 Requirements: NetLogo 6.3.0, Python 3.11, `pymoo` 0.6.x, `pandas`, `numpy`.
+These are the actual dependencies — the thesis's Appendix D additionally
+lists `pyNetLogo`, `scipy` and `matplotlib`, which the code does not use
+(erratum 4 below).
 
 1. Set `NETLOGO_PATH` in `nsga2_config_v5_1_1.json` to your
    `netlogo-headless.sh`.
@@ -97,7 +100,7 @@ precision. The conventions required:
   decision-variable values reproduce exactly (knee CDR
   0.0011 / 0.0056 / 0.0029; mean 0.003, CV 57%).
 
-### Errata (cosmetic; no conclusion affected)
+### Errata (no conclusion affected)
 
 1. The Table IV.7 knee *innovation shares* (54.4% / 64.9% / 63.1%) are
    computed against the **global** maximum innovation across the three
@@ -111,6 +114,16 @@ precision. The conventions required:
    (+0.30 / +0.41 / +0.49 per seed) but only marginally on the
    trajectories (pooled r = +0.05; per-seed +0.15 / +0.11 / −0.08) —
    it should be read as a Pareto-front property.
+4. Appendix D lists `pyNetLogo` 0.5.2 as the Python–NetLogo bridge.
+   **The code does not use pyNetLogo.** Both drivers couple to NetLogo by
+   writing a BehaviorSpace experiment to a temporary XML file and invoking
+   `netlogo-headless` as a subprocess with `--setup-file`, reading results
+   back from the `--table` CSV. Install the requirements listed above, not
+   pyNetLogo. Appendix D also lists `scipy` and `matplotlib`, which no
+   script in this package imports (they were presumably used for the
+   thesis figures, outside the replication package). This affects only how
+   a replicator prepares the environment; every reported result is
+   unchanged.
 
 ## Extension study (post-defence)
 
