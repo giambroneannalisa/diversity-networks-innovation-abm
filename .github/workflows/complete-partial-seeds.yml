@@ -1,0 +1,143 @@
+name: Complete partial seeds
+
+# Four seeds of the ten-seed extension (42, 123, 456, 5678) hit the runner's
+# wall-clock limit at generation 45 of 50. Their trajectory checkpoints hold
+# the full population at that generation, so each needs only the remaining
+# five generations rather than a fresh 50-generation run.
+#
+# Each job resumes one seed from the artifacts of the original run and
+# uploads a complete generation-50 front. See the [V2-4] notes in
+# run_trajectory_v2.py for what a resumed run is and is not.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Run ID holding the interrupted runs artifacts'
+        required: true
+        default: '30167710986'
+
+jobs:
+  complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [42, 123, 456, 5678]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache NetLogo 6.3.0
+        id: netlogo-cache
+        uses: actions/cache@v4
+        with:
+          path: netlogo
+          key: netlogo-6.3.0-64
+
+      - name: Install NetLogo 6.3.0
+        if: steps.netlogo-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          for url in \
+            "https://downloads.netlogo.org/6.3.0/NetLogo-6.3.0-64.tgz" \
+            "https://ccl.northwestern.edu/netlogo/6.3.0/NetLogo-6.3.0-64.tgz"; do
+            if curl -fsSL -o /tmp/netlogo.tgz "$url" && file /tmp/netlogo.tgz | grep -q 'gzip compressed'; then
+              break
+            fi
+            rm -f /tmp/netlogo.tgz
+          done
+          test -s /tmp/netlogo.tgz || { echo "::error::NetLogo download failed"; exit 1; }
+          mkdir -p netlogo && tar xzf /tmp/netlogo.tgz -C netlogo --strip-components=1
+
+      - name: Install Python dependencies
+        run: pip install "pymoo==0.6.*" pandas numpy
+
+      - name: Fetch the interrupted run's checkpoint
+        uses: actions/download-artifact@v4
+        with:
+          name: results-seed-${{ matrix.seed }}
+          path: resume
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stage checkpoint and verify the resume point
+        run: |
+          set -e
+          cp resume/trajectory_seed${{ matrix.seed }}_checkpoint.csv .
+          cp resume/replicates_seed${{ matrix.seed }}.csv .
+          if [ -f resume/pareto_seed${{ matrix.seed }}.csv ]; then
+            echo "::error::seed ${{ matrix.seed }} already completed; nothing to resume"
+            exit 1
+          fi
+          python3 - <<'EOF'
+          import csv, os
+          s = "${{ matrix.seed }}"
+          rows = [r for r in csv.DictReader(open(f"trajectory_seed{s}_checkpoint.csv"))
+                  if r.get("Generation")]
+          gens = sorted({int(r["Generation"]) for r in rows})
+          last = gens[-1]
+          n = sum(1 for r in rows if int(r["Generation"]) == last)
+          log = list(csv.DictReader(open(f"replicates_seed{s}.csv")))
+          ev = max(int(r["eval_index"]) for r in log)
+          print(f"seed {s}: generations {gens[0]}-{last} present, "
+                f"{n} individuals at generation {last}, "
+                f"last evaluation index {ev}")
+          assert last < 50, "checkpoint is already at the final generation"
+          assert n == 50, f"expected a population of 50, found {n}"
+          EOF
+
+      - name: Point config at the runner's NetLogo
+        run: |
+          python3 - <<'EOF'
+          import json
+          c = json.load(open('nsga2_config_v5_1_1.json'))
+          c['NETLOGO_PATH'] = './netlogo/netlogo-headless.sh'
+          json.dump(c, open('config_ci.json', 'w'), indent=2)
+          EOF
+
+      - name: Resume seed ${{ matrix.seed }} to generation 50
+        run: |
+          python3 run_trajectory_v2.py config_ci.json --seed ${{ matrix.seed }} \
+            --resume-from trajectory_seed${{ matrix.seed }}_checkpoint.csv \
+            --resume-log   replicates_seed${{ matrix.seed }}.csv
+
+      - name: Verify the completed run
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import csv, os, sys
+          from collections import Counter
+          s = "${{ matrix.seed }}"
+          if not os.path.exists(f"pareto_seed{s}.csv"):
+              sys.exit("no final front produced")
+          traj = list(csv.DictReader(open(f"trajectory_seed{s}.csv")))
+          gens = sorted({int(r["Generation"]) for r in traj})
+          front = list(csv.DictReader(open(f"pareto_seed{s}.csv")))
+          log = list(csv.DictReader(open(f"replicates_seed{s}.csv")))
+          seeds = [int(r["netlogo_seed"]) for r in log]
+          dup = [x for x, n in Counter(seeds).items() if n > 1]
+          print(f"generations {gens[0]}-{gens[-1]} ({len(gens)} total)")
+          print(f"final front: {len(front)} solutions")
+          print(f"replicate log: {len(log)} rows, {len(set(seeds))} distinct NetLogo seeds")
+          print(f"reused seeds: {len(dup)}")
+          assert gens[-1] == 50, "did not reach generation 50"
+          assert len(gens) == 50, f"trajectory has gaps: {len(gens)} generations"
+          assert not dup, "a NetLogo seed was reused across the resume boundary"
+          print("OK")
+          EOF
+
+      - name: Upload completed results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: completed-seed-${{ matrix.seed }}
+          path: |
+            trajectory_seed${{ matrix.seed }}.csv
+            pareto_seed${{ matrix.seed }}.csv
+            replicates_seed${{ matrix.seed }}.csv
+          retention-days: 90

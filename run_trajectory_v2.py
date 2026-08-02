@@ -18,14 +18,43 @@ Changes vs run_trajectory.py (v1, used for the thesis runs):
   [V2-3] Loud failure accounting. v1 silently mapped failed evaluations to
          (1e10, 1e10, 1e10). v2 does the same fallback but counts and prints
          failures, and exits with a warning if any occurred.
+  [V2-4] Resume. A run stopped by a wall-clock limit can be continued from
+         its trajectory checkpoint: the checkpoint holds the full population
+         (X and F) at its last completed generation, which is all NSGA-II
+         needs to carry on. See --resume-from below.
 
 Usage:
     python3 run_trajectory_v2.py <config.json> --seed <N>
+    python3 run_trajectory_v2.py <config.json> --seed <N> \
+        --resume-from trajectory_seed<N>_checkpoint.csv \
+        --resume-log   replicates_seed<N>.csv
 
 Output:
     trajectory_seed<N>.csv   — all generations × all individuals
     pareto_seed<N>.csv       — final Pareto front
     replicates_seed<N>.csv   — per-replicate seeds and objectives
+
+Three properties of a resumed run, all verified on a mock simulator:
+
+  * Replicate seeding stays deterministic and collision-free. Seeds derive
+    from (master seed, evaluation index), and the evaluation index continues
+    past the interrupted run's last one, so no NetLogo seed is ever reused.
+  * The trajectory is continuous: the interrupted run's generations are
+    carried into the output, and the segment numbers its own from there.
+  * pymoo re-evaluates the resumed population even though the checkpoint
+    supplies its objective values, so the first segment generation costs
+    pop_size extra evaluations. This is left as-is: the re-evaluation is a
+    fresh, independent Monte Carlo estimate of the same parameter vectors,
+    and suppressing it would mean overriding the Evaluator's internals for
+    a modest saving. It does mean the objective values recorded for the
+    resume generation may differ slightly from the checkpoint's.
+
+pymoo's RNG state cannot be serialised, so the segment draws its operator
+randomness from a fresh stream derived from
+SeedSequence([master_seed, RESUME_TAG, resume_generation]) — deterministic
+given the resume point, but NOT bit-identical to what an uninterrupted run
+would have produced. A resumed run is a valid NSGA-II run; it is not the
+same run, and analyses should say so.
 """
 import json, os, sys, subprocess
 import pandas as pd
@@ -40,6 +69,9 @@ from pymoo.operators.sampling.rnd import FloatRandomSampling
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.core.callback import Callback
+from pymoo.core.population import Population
+
+RESUME_TAG = 0x5EED     # [V2-4] distinguishes the resume operator stream
 
 EXPERIMENT_XML = """
 <experiments>
@@ -60,15 +92,20 @@ EXPERIMENT_XML = """
 
 
 class TrajectoryCallback(Callback):
-    """Accumulates ALL generation data in memory; periodic checkpoint to disk."""
-    def __init__(self, param_names, seed=42):
+    """Accumulates ALL generation data in memory; periodic checkpoint to disk.
+
+    `prior` carries the generations of an interrupted run being resumed, so
+    the checkpoint written here always holds the complete trajectory.
+    """
+    def __init__(self, param_names, seed=42, gen_offset=0, prior=None):
         super().__init__()
         self.param_names = param_names
-        self.history = []
+        self.history = [] if prior is None else [prior]
         self.seed = seed
+        self.gen_offset = gen_offset
 
     def notify(self, algorithm):
-        gen = algorithm.n_gen
+        gen = algorithm.n_gen + self.gen_offset
         pop = algorithm.pop
         X = pop.get("X")
         F = pop.get("F")
@@ -140,19 +177,22 @@ def run_single_simulation(params, config, task):
 
 
 class NetLogoOptimization(ElementwiseProblem):
-    def __init__(self, config, master_seed, n_threads=4):
+    def __init__(self, config, master_seed, n_threads=4, eval_index_start=0):
         self.config = config
         self.params = config["PARAM_BOUNDS"]
         self.param_names = list(self.params.keys())
         self.n_replicates = config.get("N_REPLICATES", 1)
         self.n_threads = n_threads
         self.master_seed = master_seed
-        self.eval_index = 0          # incremented once per candidate evaluation
+        # incremented once per candidate evaluation; on resume it continues
+        # past the interrupted run's last index so no replicate seed repeats
+        self.eval_index = eval_index_start
         self.failed_runs = 0
         self.replicate_log = f"replicates_seed{master_seed}.csv"
-        with open(self.replicate_log, "w") as f:
-            f.write("eval_index," + ",".join(self.param_names) +
-                    ",replicate,netlogo_seed,innovation,diversity,gini\n")
+        if eval_index_start == 0 or not os.path.exists(self.replicate_log):
+            with open(self.replicate_log, "w") as f:
+                f.write("eval_index," + ",".join(self.param_names) +
+                        ",replicate,netlogo_seed,innovation,diversity,gini\n")
         xl = [self.params[k][0] for k in self.param_names]
         xu = [self.params[k][1] for k in self.param_names]
         super().__init__(n_var=len(self.param_names), n_obj=3, xl=xl, xu=xu)
@@ -193,39 +233,91 @@ class NetLogoOptimization(ElementwiseProblem):
         out["F"] = [-df_res['innovation'].mean(), -df_res['diversity'].mean(), df_res['gini'].mean()]
 
 
+def load_resume_state(path, param_names, log_path=None):
+    """[V2-4] Read an interrupted run's checkpoint: the population (X, F) at
+    its last completed generation, that generation's number, the earlier
+    trajectory, and the evaluation index to continue from."""
+    traj = pd.read_csv(path)
+    traj = traj[traj['Generation'].notna()]
+    last_gen = int(traj['Generation'].max())
+    pop_rows = traj[traj['Generation'] == last_gen]
+    X = pop_rows[param_names].to_numpy(dtype=float)
+    F = pop_rows[['Obj_Innov_Neg', 'Obj_Div_Neg', 'Obj_Gini']].to_numpy(dtype=float)
+
+    next_eval = 0
+    if log_path and os.path.exists(log_path):
+        log = pd.read_csv(log_path)
+        if len(log):
+            next_eval = int(log['eval_index'].max()) + 1
+    return X, F, last_gen, traj, next_eval
+
+
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
 
     if len(sys.argv) < 2:
-        print("Usage: python3 run_trajectory_v2.py <config.json> --seed <N>")
+        print("Usage: python3 run_trajectory_v2.py <config.json> --seed <N> "
+              "[--resume-from <checkpoint.csv> --resume-log <replicates.csv>]")
         sys.exit(1)
 
     with open(sys.argv[1], 'r') as f:
         config = json.load(f)
 
-    master_seed = 42
-    if '--seed' in sys.argv:
-        idx = sys.argv.index('--seed')
-        master_seed = int(sys.argv[idx + 1])
+    def opt(flag, default=None):
+        return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else default
+
+    master_seed = int(opt('--seed', 42))
+    resume_from = opt('--resume-from')
+    resume_log = opt('--resume-log')
+    total_gens = config.get("N_GENERATIONS", 50)
 
     n_cpu = multiprocessing.cpu_count()
     print(f"=== Trajectory Run v2 (Seed={master_seed}, CPUs={n_cpu}, deterministic replicate seeding) ===\n")
 
-    problem = NetLogoOptimization(config, master_seed, n_threads=n_cpu)
-    trajectory_cb = TrajectoryCallback(problem.param_names, seed=master_seed)
+    param_names = list(config["PARAM_BOUNDS"].keys())
+    gen_offset, prior_traj, eval_start = 0, None, 0
+    sampling = FloatRandomSampling()
+    pymoo_seed = master_seed
+
+    if resume_from:
+        X0, F0, gen_offset, prior_traj, eval_start = load_resume_state(
+            resume_from, param_names, resume_log)
+        remaining = total_gens - gen_offset
+        if remaining <= 0:
+            sys.exit(f"Checkpoint already at generation {gen_offset} of {total_gens}: nothing to do")
+        # Population carrying F: pymoo's evaluator skips already-evaluated
+        # individuals, so the resumed segment costs only its new offspring.
+        sampling = Population.new("X", X0, "F", F0)
+        # Fresh operator stream for the segment: reusing seed=master_seed
+        # would replay the draws the interrupted run already consumed. The
+        # RESUME_TAG keeps this stream disjoint from the replicate-seed
+        # streams, which are keyed on (master_seed, evaluation index).
+        pymoo_seed = int(np.random.SeedSequence(
+            [master_seed, RESUME_TAG, gen_offset]
+        ).generate_state(1, dtype=np.uint64)[0] % 2147483646) + 1
+        print(f"  [resume] population of {len(X0)} at generation {gen_offset}; "
+              f"running {remaining} more to {total_gens}")
+        print(f"  [resume] evaluation index continues at {eval_start}; "
+              f"segment operator seed {pymoo_seed}")
+        total_gens = remaining
+
+    problem = NetLogoOptimization(config, master_seed, n_threads=n_cpu,
+                                  eval_index_start=eval_start)
+    trajectory_cb = TrajectoryCallback(problem.param_names, seed=master_seed,
+                                       gen_offset=gen_offset, prior=prior_traj)
 
     algorithm = NSGA2(
         pop_size=config.get("POP_SIZE", 50),
         n_offsprings=10,
-        sampling=FloatRandomSampling(),
+        sampling=sampling,
         crossover=SBX(prob=0.9, eta=15),
         mutation=PM(eta=20),
         eliminate_duplicates=True
     )
 
     res = minimize(problem, algorithm,
-                   ('n_gen', config.get("N_GENERATIONS", 50)),
-                   seed=master_seed,
+                   ('n_gen', total_gens),
+                   seed=pymoo_seed,
                    callback=trajectory_cb,
                    verbose=False)
 
