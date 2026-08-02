@@ -1,0 +1,43 @@
+name: Move a tag
+
+# One-shot maintenance: force a tag onto a given commit. Needed because tag
+# updates are not always possible from the environment that rewrote history.
+# Delete this workflow once the tag is correct.
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to move'
+        required: true
+        default: 'v1.0.0'
+      sha:
+        description: 'Commit the tag should point at'
+        required: true
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify the target commit carries identical content
+        run: |
+          set -e
+          git cat-file -e ${{ inputs.sha }}^{commit}
+          echo "target commit:"
+          git log -1 --format='  %H%n  author: %an <%ae>%n  tree:   %T%n  %s' ${{ inputs.sha }}
+          echo "current tag:"
+          git log -1 --format='  %H%n  tree:   %T' ${{ inputs.tag }} || echo "  (tag absent)"
+
+      - name: Move the tag
+        run: |
+          set -e
+          git tag -f ${{ inputs.tag }} ${{ inputs.sha }}
+          git push -f origin refs/tags/${{ inputs.tag }}
+          echo "moved ${{ inputs.tag }} -> $(git rev-list -n1 ${{ inputs.tag }})"
