@@ -1,0 +1,80 @@
+name: numpy CPU dispatch check
+
+# The reproducibility pilot found generation 1 identical and the first
+# offspring of generation 2 different by one unit in the last place of a
+# single parameter, with the NetLogo results for that individual unchanged.
+# That points away from the simulator and at the optimiser's arithmetic.
+#
+# numpy 2 selects vectorised kernels at run time from the CPU's instruction
+# set. GitHub's hosted runners are not a single CPU model, so two runs of the
+# same code on the same image can take different SIMD paths through
+# transcendental functions — and SBX raises to a fractional power.
+#
+# This job tests exactly that, with no NetLogo and no ABM involved: several
+# runners each execute an identical NSGA-II run on an analytic problem with a
+# fixed seed, and print the CPU model, numpy's dispatch state, and a digest of
+# the result. Identical digests across differing CPUs would exonerate numpy;
+# digests that track the CPU model would confirm it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      replicas:
+        description: 'JSON array of replica indices'
+        required: true
+        default: '[1,2,3,4,5,6,7,8]'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        replica: ${{ fromJSON(inputs.replicas) }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install "pymoo==0.6.2" "pandas==3.0.5" "numpy==2.4.6" "scipy==1.17.1"
+
+      - name: Probe
+        run: |
+          echo "replica ${{ matrix.replica }}"
+          grep -m1 'model name' /proc/cpuinfo
+          grep -m1 'cpu family' /proc/cpuinfo
+          grep -m1 '^flags' /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx|avx2|avx512f|avx512_|sse4_2)' | tr '\n' ' '; echo
+          python3 - <<'EOF'
+          import hashlib
+          import numpy as np
+          from numpy._core._multiarray_umath import (
+              __cpu_baseline__, __cpu_dispatch__, __cpu_features__)
+
+          enabled = sorted(f for f in __cpu_dispatch__ if __cpu_features__.get(f))
+          print("numpy baseline:", " ".join(__cpu_baseline__))
+          print("numpy dispatch enabled:", " ".join(enabled))
+
+          # 1. the bare arithmetic SBX performs: a fractional power
+          rng = np.random.default_rng(789)
+          v = rng.random(10_000) + 0.5
+          p = np.power(v, 1.0 / 16.0)          # SBX uses 1/(eta+1), eta=15
+          print("power digest:", hashlib.sha256(p.tobytes()).hexdigest()[:32])
+
+          # 2. the whole optimiser, same configuration as the experiment,
+          #    on an analytic problem so nothing outside numpy can vary
+          from pymoo.algorithms.moo.nsga2 import NSGA2
+          from pymoo.operators.crossover.sbx import SBX
+          from pymoo.operators.mutation.pm import PM
+          from pymoo.optimize import minimize
+          from pymoo.problems import get_problem
+
+          res = minimize(get_problem("zdt1"),
+                         NSGA2(pop_size=50, n_offsprings=10,
+                               crossover=SBX(prob=0.9, eta=15),
+                               mutation=PM(eta=20),
+                               eliminate_duplicates=True),
+                         ("n_gen", 30), seed=789, verbose=False)
+          print("nsga2 X digest:", hashlib.sha256(res.X.tobytes()).hexdigest()[:32])
+          print("nsga2 F digest:", hashlib.sha256(res.F.tobytes()).hexdigest()[:32])
+          EOF
