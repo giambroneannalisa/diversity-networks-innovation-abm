@@ -27,6 +27,9 @@ reproduce the thesis statistics from the archived data.
 | `data/trajectory_seed{42,123,456}.csv` | Full evolutionary trajectories (2,500 rows each = 50 generations × 50 individuals). Each front is exactly the non-dominated subset of its generation 50; no failed evaluations |
 | `data/trajectory_seed{42,456}_checkpoint.csv` | Generation-50 checkpoints (byte-identical to the final trajectory files) |
 | `analyze_fronts.py` | Cross-seed analysis: recomputes the thesis statistics from the fronts (stdlib only). A later reconstruction, not the original analysis tooling |
+| `compare_seeds.py` | Thesis fronts against a second set of fronts: per-seed knee points and correlations, group summaries, bootstrap intervals, CDR-regime table. Keys fronts by (group, seed) so a seed present in both sets is compared, not overwritten |
+| `paired_driver_check.py` | Whether a design of this size can resolve a relation at all: mean \|r\| against its within-front sampling error, pooled means with bootstrap intervals, a sensitivity view restricted to distinct master seeds, and the v1-vs-v2 comparison on shared seeds |
+| `trajectory_channel_check.py` | Decomposes the CDR-innovation association: the knowledge-production response curve, the correlation on the full evaluation cloud versus on the front, and innovation binned by realised diversity |
 | `run_all_seeds.sh` | Batch runner for the 10-seed extension experiment |
 | `.github/workflows/run-10-seeds.yml` | GitHub Actions workflow running the 10-seed extension on hosted runners |
 

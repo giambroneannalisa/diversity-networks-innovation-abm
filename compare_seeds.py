@@ -74,25 +74,39 @@ def stats(vals):
     return m, sd, min(vals), max(vals), cv
 
 
-def boot_ci(vals, level=0.95):
-    """Percentile bootstrap CI of the mean (fixed RNG → deterministic)."""
+def _mean(v):
+    return sum(v) / len(v)
+
+
+def _median(v):
+    s = sorted(v)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def boot_ci(vals, level=0.95, stat=_mean):
+    """Percentile bootstrap CI of `stat` (fixed RNG → deterministic)."""
     rng = random.Random(BOOT_SEED)
     n = len(vals)
     if n < 2:
         nan = float('nan')
         return nan, nan
-    means = sorted(sum(rng.choice(vals) for _ in range(n)) / n for _ in range(BOOT_N))
-    lo = means[int((1 - level) / 2 * BOOT_N)]
-    hi = means[int((1 + level) / 2 * BOOT_N) - 1]
+    reps = sorted(stat([rng.choice(vals) for _ in range(n)]) for _ in range(BOOT_N))
+    lo = reps[int((1 - level) / 2 * BOOT_N)]
+    hi = reps[int((1 + level) / 2 * BOOT_N) - 1]
     return lo, hi
 
 
 def collect(directory, label):
+    """Key by (label, seed): the extension re-runs some thesis seeds under the
+    v2 driver, so seed alone would let one group overwrite the other."""
     out = {}
     for p in sorted(glob.glob(os.path.join(directory, 'pareto_seed*.csv')),
                     key=lambda q: int(re.search(r'seed(\d+)', q).group(1))):
         s = int(re.search(r'seed(\d+)', p).group(1))
-        out[s] = {'rows': load(p), 'group': label}
+        gen = re.search(r'_gen(\d+)', os.path.basename(p))
+        out[(label, s)] = {'rows': load(p), 'group': label,
+                           'seed': s, 'gen': int(gen.group(1)) if gen else 50}
     return out
 
 
@@ -104,8 +118,8 @@ def main(thesis_dir, ext_dir):
         sys.exit('No pareto_seed*.csv found in either directory')
 
     groups = {'thesis': [], 'extension': []}
-    for s, d in fronts.items():
-        groups[d['group']].append(s)
+    for k, d in fronts.items():
+        groups[d['group']].append(d['seed'])
 
     print(f"Loaded {len(fronts)} fronts")
     print(f"  thesis    (v1 driver): {sorted(groups['thesis'])}")
@@ -113,16 +127,17 @@ def main(thesis_dir, ext_dir):
 
     # ---- per-seed table -------------------------------------------------
     print("\n=== Per-seed knee points and key correlations ===")
-    print(f"{'seed':>6} {'group':>10} {'n':>4} {'kneeCDR':>9} {'regime':>7} "
+    print(f"{'seed':>6} {'group':>10} {'gen':>4} {'n':>4} {'kneeCDR':>9} {'regime':>7} "
           f"{'div%':>6} {'innov%':>7} {'CDR-Div':>8} {'CDR-Inn':>8} {'Inn-Gini':>9} {'PE-Gini':>8}")
     per_seed = {}
-    for s in sorted(fronts, key=lambda x: (fronts[x]['group'] != 'thesis', x)):
+    for s in sorted(fronts, key=lambda x: (fronts[x]['group'] != 'thesis', fronts[x]['seed'])):
         rows = fronts[s]['rows']
         innov, div, gini = objectives(rows)
         cdr, pe = col(rows, 'cultural-diffusion-rate'), col(rows, 'policy-effectiveness')
         k = knee(rows)
         rec = {
             'group': fronts[s]['group'], 'n': len(rows),
+            'seed': fronts[s]['seed'], 'gen': fronts[s]['gen'],
             'knee_cdr': cdr[k],
             'knee_bcw': col(rows, 'bridging-capital-weight')[k],
             'knee_idr': col(rows, 'innovation-diffusion-rate')[k],
@@ -133,7 +148,7 @@ def main(thesis_dir, ext_dir):
             'innov_gini': pearson(innov, gini), 'pe_gini': pearson(pe, gini),
         }
         per_seed[s] = rec
-        print(f"{s:>6} {rec['group']:>10} {rec['n']:>4} {rec['knee_cdr']:>9.4f} "
+        print(f"{rec['seed']:>6} {rec['group']:>10} {rec['gen']:>4} {rec['n']:>4} {rec['knee_cdr']:>9.4f} "
               f"{regime(rec['knee_cdr']):>7} {rec['div_share']:>5.1f}% {rec['innov_share']:>6.1f}% "
               f"{rec['cdr_div']:>+8.3f} {rec['cdr_innov']:>+8.3f} "
               f"{rec['innov_gini']:>+9.3f} {rec['pe_gini']:>+8.3f}")
@@ -170,7 +185,8 @@ def main(thesis_dir, ext_dir):
         low = [s for s in ss if regime(per_seed[s]['knee_cdr']) == 'low']
         out = [s for s in ss if regime(per_seed[s]['knee_cdr']) != 'low']
         print(f"  {g:>10}: {len(low)}/{len(ss)} in low-CDR"
-              + (f"  — outside: " + ", ".join(f"seed {s} (CDR={per_seed[s]['knee_cdr']:.4f}, "
+              + (f"  — outside: " + ", ".join(f"seed {per_seed[s]['seed']} "
+                                              f"(CDR={per_seed[s]['knee_cdr']:.4f}, "
                                               f"{regime(per_seed[s]['knee_cdr'])})" for s in out) if out else ""))
 
     print("\n=== Bootstrap 95% CI of pooled means (10,000 resamples, fixed RNG) ===")
@@ -181,6 +197,30 @@ def main(thesis_dir, ext_dir):
         lo, hi = boot_ci(vals)
         m = sum(vals) / len(vals)
         print(f"  {label:>20}: mean {m:+.4f}  95% CI [{lo:+.4f}, {hi:+.4f}]")
+
+    # ---- statistics the robustness claim rests on -----------------------
+    pooled = subset('pooled')
+    knees = [per_seed[s]['knee_cdr'] for s in pooled]
+    lo, hi = boot_ci(knees, stat=_median)
+    print(f"\n  {'knee CDR (median)':>20}: {_median(knees):+.4f}  95% CI [{lo:+.4f}, {hi:+.4f}]"
+          "   ← median resists the single mid-regime outlier")
+    ind = [1.0 if regime(per_seed[s]['knee_cdr']) == 'low' else 0.0 for s in pooled]
+    lo, hi = boot_ci(ind)
+    print(f"  {'P(knee in low-CDR)':>20}: {_mean(ind):.3f}    95% CI [{lo:.3f}, {hi:.3f}]")
+
+    # ---- same master seed under both drivers ----------------------------
+    shared = sorted({k[1] for k in pooled
+                     if k[0] == 'thesis' and ('extension', k[1]) in per_seed})
+    if shared:
+        print("\n=== Same master seed, v1 vs v2 driver "
+              "(v2 runs of these seeds stopped at generation 45) ===")
+        print(f"{'seed':>6} {'knee CDR v1':>12} {'knee CDR v2':>12} {'regime v1':>10} "
+              f"{'regime v2':>10} {'CDR-Div v1':>11} {'CDR-Div v2':>11}")
+        for s in shared:
+            a, b = per_seed[('thesis', s)], per_seed[('extension', s)]
+            print(f"{s:>6} {a['knee_cdr']:>12.4f} {b['knee_cdr']:>12.4f} "
+                  f"{regime(a['knee_cdr']):>10} {regime(b['knee_cdr']):>10} "
+                  f"{a['cdr_div']:>+11.3f} {b['cdr_div']:>+11.3f}")
 
     # ---- pooled-front regime table -------------------------------------
     print("\n=== CDR regimes on the pooled front (all seeds' solutions together) ===")
