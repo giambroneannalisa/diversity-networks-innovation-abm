@@ -246,7 +246,14 @@ def load_resume_state(path, param_names, log_path=None):
     """[V2-4] Read an interrupted run's checkpoint: the population (X, F) at
     its last completed generation, that generation's number, the earlier
     trajectory, and the evaluation index to continue from."""
-    traj = pd.read_csv(path)
+    # float_precision='round_trip' is required, not cosmetic. pandas' default
+    # parser is accurate to about 1e-16 but not exact, so the default silently
+    # perturbs the checkpoint by one or two units in the last place — both in
+    # the population handed back to pymoo and in the earlier generations
+    # re-written into the completed trajectory. Nothing moves at any reported
+    # precision, but the resumed file then differs bit-for-bit from the
+    # interrupted run's own output, which defeats digest comparison.
+    traj = pd.read_csv(path, float_precision='round_trip')
     traj = traj[traj['Generation'].notna()]
     last_gen = int(traj['Generation'].max())
     pop_rows = traj[traj['Generation'] == last_gen]

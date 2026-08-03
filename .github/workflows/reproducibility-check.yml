@@ -1,0 +1,131 @@
+name: Reproducibility check
+
+# Re-runs `run_trajectory_v2.py` at master seeds that have already been run,
+# and prints byte-level digests of the output files. The claim under test is
+# the one [V2-1] makes in the driver: same --seed, same output files, bit for
+# bit. The digests are compared against the archived run's digests; nothing
+# from the archived run is needed on the runner, so this workflow proves the
+# claim without republishing any data.
+#
+# Two stages, both driven from here:
+#
+#   pilot — `n_generations: 3` on one or two seeds. About 45 minutes: the
+#           first generation evaluates the whole population (~30 min), later
+#           generations only ten offspring (~6 min). Exercises everything that
+#           can break determinism — NetLogo, the seed derivation, pymoo's
+#           initial sampling and first offspring, pandas' float formatting.
+#
+#   full  — `n_generations: 50` on all comparable seeds, ~6 hours wall clock
+#           with the jobs running in parallel.
+#
+# Which seeds are comparable, and how deep:
+#
+#   789, 1234, 2345, 3456, 4567, 6789 — uninterrupted originals. Every
+#     generation, every evaluation and the final front are comparable.
+#   42, 123, 456, 5678 — these hit the runner's wall-clock limit at
+#     generation 45 and were completed from their checkpoints. Only
+#     generations 1-45 are comparable; the resumed segment ran on a
+#     different operator stream by construction and a fresh run will not,
+#     and should not, reproduce it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: 'JSON array of master seeds, e.g. [789] or [789,1234]'
+        required: true
+        default: '[789]'
+      n_generations:
+        description: 'Generations to run (3 = pilot, 50 = full)'
+        required: true
+        default: '3'
+
+jobs:
+  rerun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: ${{ fromJSON(inputs.seeds) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache NetLogo 6.3.0
+        id: netlogo-cache
+        uses: actions/cache@v4
+        with:
+          path: netlogo
+          key: netlogo-6.3.0-64
+
+      - name: Install NetLogo 6.3.0
+        if: steps.netlogo-cache.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          for url in \
+            "https://downloads.netlogo.org/6.3.0/NetLogo-6.3.0-64.tgz" \
+            "https://ccl.northwestern.edu/netlogo/6.3.0/NetLogo-6.3.0-64.tgz"; do
+            if curl -fsSL -o /tmp/netlogo.tgz "$url" && file /tmp/netlogo.tgz | grep -q 'gzip compressed'; then
+              break
+            fi
+            rm -f /tmp/netlogo.tgz
+          done
+          test -s /tmp/netlogo.tgz || { echo "::error::NetLogo download failed"; exit 1; }
+          mkdir -p netlogo && tar xzf /tmp/netlogo.tgz -C netlogo --strip-components=1
+
+      # Exactly what pip resolved for the original run (run 30167710986,
+      # 25 July 2026). pandas in particular governs the float formatting of
+      # the trajectory and front CSVs, so a different minor version would
+      # change the bytes without changing the numbers.
+      - name: Install Python dependencies
+        run: pip install "pymoo==0.6.2" "pandas==3.0.5" "numpy==2.4.6" "scipy==1.17.1"
+
+      - name: Record the environment
+        run: |
+          python3 -VV
+          python3 -c "import pymoo,numpy,pandas,scipy; print('pymoo',pymoo.__version__,'numpy',numpy.__version__,'pandas',pandas.__version__,'scipy',scipy.__version__)"
+          ./netlogo/netlogo-headless.sh --version || true
+          uname -a
+          md5sum Urban_Innovation_Model_v5.1.nlogo run_trajectory_v2.py nsga2_config_v5_1_1.json
+
+      - name: Configure the run
+        run: |
+          python3 - <<'EOF'
+          import json
+          c = json.load(open('nsga2_config_v5_1_1.json'))
+          c['NETLOGO_PATH'] = './netlogo/netlogo-headless.sh'
+          c['N_GENERATIONS'] = int("${{ inputs.n_generations }}")
+          json.dump(c, open('config_ci.json', 'w'), indent=2)
+          print(json.dumps(c, indent=2))
+          EOF
+
+      - name: Re-run seed ${{ matrix.seed }}
+        run: python3 run_trajectory_v2.py config_ci.json --seed ${{ matrix.seed }}
+
+      # The verdict is these digests. They are printed in full so the log
+      # itself is the evidence, independently of the artifacts' retention.
+      - name: Digests of the re-run output
+        if: always()
+        run: |
+          echo "::group::digests for seed ${{ matrix.seed }}"
+          python3 repro_digest.py \
+            trajectory_seed${{ matrix.seed }}.csv \
+            replicates_seed${{ matrix.seed }}.csv \
+            pareto_seed${{ matrix.seed }}.csv
+          echo "::endgroup::"
+
+      - name: Upload the re-run output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rerun-seed-${{ matrix.seed }}-gen${{ inputs.n_generations }}
+          path: |
+            trajectory_seed${{ matrix.seed }}.csv
+            replicates_seed${{ matrix.seed }}.csv
+            pareto_seed${{ matrix.seed }}.csv
+          if-no-files-found: warn
+          retention-days: 90
