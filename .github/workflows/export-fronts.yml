@@ -17,11 +17,15 @@ on:
         required: true
         default: '30167710986'
       mode:
-        description: 'export = fronts only; export-all = every artifact file; cleanup = delete the branch'
+        description: 'export = fronts only; export-all = every artifact file; cleanup = delete a transfer branch'
         required: true
         default: 'export'
         type: choice
         options: [export, export-all, cleanup]
+      branch:
+        description: 'Transfer branch to delete in cleanup mode'
+        required: false
+        default: 'extension-fronts'
 
 jobs:
   cleanup:
@@ -29,8 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Delete the extension-fronts branch
-        run: git push origin --delete extension-fronts || echo "already gone"
+      - name: Delete the transfer branch
+        run: git push origin --delete "${{ inputs.branch }}" || echo "already gone"
 
   export-all:
     if: inputs.mode == 'export-all'
