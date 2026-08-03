@@ -55,7 +55,7 @@ jobs:
           mkdir -p netlogo && tar xzf /tmp/netlogo.tgz -C netlogo --strip-components=1
 
       - name: Install Python dependencies
-        run: pip install "pymoo==0.6.2" "pandas==2.2.*" "numpy==1.26.*"
+        run: pip install "pymoo==0.6.2" "pandas==3.0.5" "numpy==2.4.6" "scipy==1.17.1"
 
       - name: Fetch the interrupted run's checkpoint
         uses: actions/download-artifact@v4
