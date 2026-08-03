@@ -1,0 +1,54 @@
+name: Reproducibility diagnosis
+
+# Prints the rows around a digest divergence found by reproducibility-check,
+# so the cause can be identified: identical parameters with different NetLogo
+# results points at the simulator, different parameters at the optimiser.
+# Downloads an existing artifact; runs no simulations.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID of the reproducibility-check run'
+        required: true
+      seed:
+        description: 'Master seed to inspect'
+        required: true
+        default: '789'
+      artifact:
+        description: 'Artifact name'
+        required: true
+        default: 'rerun-seed-789-gen3'
+      eval_from:
+        description: 'First evaluation index to print'
+        required: true
+        default: '45'
+      eval_to:
+        description: 'Last evaluation index to print'
+        required: true
+        default: '60'
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: rerun
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Print the rows around the divergence
+        run: |
+          set -e
+          S=${{ inputs.seed }}
+          echo "::group::replicate log, evaluations ${{ inputs.eval_from }}-${{ inputs.eval_to }}"
+          head -1 rerun/replicates_seed$S.csv
+          awk -F, -v a=${{ inputs.eval_from }} -v b=${{ inputs.eval_to }} \
+            'NR>1 && $1>=a && $1<=b' rerun/replicates_seed$S.csv
+          echo "::endgroup::"
+          echo "::group::trajectory, generation 2"
+          head -1 rerun/trajectory_seed$S.csv
+          awk -F, 'NR>1 && $8==2' rerun/trajectory_seed$S.csv
+          echo "::endgroup::"
