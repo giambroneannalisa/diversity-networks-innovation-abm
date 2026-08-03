@@ -49,12 +49,21 @@ Three properties of a resumed run, all verified on a mock simulator:
     a modest saving. It does mean the objective values recorded for the
     resume generation may differ slightly from the checkpoint's.
 
-pymoo's RNG state cannot be serialised, so the segment draws its operator
+On the operator stream. pymoo 0.6.2 keeps its RNG as
+`algorithm.random_state`, a `numpy.random.Generator`, which pickles and
+restores exactly; a checkpoint that stores the algorithm object could
+therefore resume bit-identically. This driver does not do that. It resumes
+from the trajectory CSV, which records only the population (X and F), so
+there is no saved RNG state to restore and the segment draws its operator
 randomness from a fresh stream derived from
-SeedSequence([master_seed, RESUME_TAG, resume_generation]) — deterministic
-given the resume point, but NOT bit-identical to what an uninterrupted run
-would have produced. A resumed run is a valid NSGA-II run; it is not the
-same run, and analyses should say so.
+SeedSequence([master_seed, RESUME_TAG, resume_generation]). That is
+deterministic given the resume point but NOT bit-identical to what an
+uninterrupted run would have produced.
+
+The CSV route was used because it is the only one available for a run that
+has already been interrupted without an algorithm checkpoint — the case
+this option was written for. A run started with pickling in place could be
+resumed exactly; that is a worthwhile addition, not a limitation of pymoo.
 """
 import json, os, sys, subprocess
 import pandas as pd

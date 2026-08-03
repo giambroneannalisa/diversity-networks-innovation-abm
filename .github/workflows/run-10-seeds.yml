@@ -54,7 +54,7 @@ jobs:
           test -x netlogo/netlogo-headless.sh || { echo "::error::netlogo-headless.sh missing after extraction"; ls -la netlogo; exit 1; }
 
       - name: Install Python dependencies
-        run: pip install "pymoo==0.6.*" pandas numpy
+        run: pip install "pymoo==0.6.2" "pandas==2.2.*" "numpy==1.26.*"
 
       - name: Point config at the runner's NetLogo
         run: |
