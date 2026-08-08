@@ -48,6 +48,7 @@ jobs:
       - name: Probe
         run: |
           echo "replica ${{ matrix.replica }}"
+          echo "NPY_DISABLE_CPU_FEATURES=[${NPY_DISABLE_CPU_FEATURES}]"
           grep -m1 'model name' /proc/cpuinfo
           grep -m1 'cpu family' /proc/cpuinfo
           grep -m1 '^flags' /proc/cpuinfo | tr ' ' '\n' | grep -E '^(avx|avx2|avx512f|avx512_|sse4_2)' | tr '\n' ' '; echo
@@ -59,6 +60,7 @@ jobs:
 
           enabled = sorted(f for f in __cpu_dispatch__ if __cpu_features__.get(f))
           print("numpy baseline:", " ".join(__cpu_baseline__))
+          print("numpy dispatch built:", " ".join(__cpu_dispatch__))
           print("numpy dispatch enabled:", " ".join(enabled))
 
           # 1. the bare arithmetic SBX performs: a fractional power
