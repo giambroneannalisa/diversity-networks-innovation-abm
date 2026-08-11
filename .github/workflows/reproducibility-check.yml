@@ -39,11 +39,17 @@ on:
         description: 'Generations to run (3 = pilot, 50 = full)'
         required: true
         default: '3'
+      disable_cpu_features:
+        description: 'NPY_DISABLE_CPU_FEATURES (hold every runner to the same SIMD kernels)'
+        required: false
+        default: ''
 
 jobs:
   rerun:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    env:
+      NPY_DISABLE_CPU_FEATURES: ${{ inputs.disable_cpu_features }}
     strategy:
       fail-fast: false
       matrix:
@@ -84,12 +90,20 @@ jobs:
       - name: Install Python dependencies
         run: pip install "pymoo==0.6.2" "pandas==3.0.5" "numpy==2.4.6" "scipy==1.17.1"
 
+      # The CPU matters as much as the package versions. numpy 2 picks its
+      # vectorised kernels from the host's instruction set, and SBX raises to a
+      # fractional power, so an AVX-512 runner and an AVX2 runner disagree in
+      # the last bit of an offspring parameter. Record the machine, and record
+      # which kernels numpy actually settled on.
       - name: Record the environment
         run: |
           python3 -VV
           python3 -c "import pymoo,numpy,pandas,scipy; print('pymoo',pymoo.__version__,'numpy',numpy.__version__,'pandas',pandas.__version__,'scipy',scipy.__version__)"
           ./netlogo/netlogo-headless.sh --version || true
           uname -a
+          grep -m1 'model name' /proc/cpuinfo
+          echo "NPY_DISABLE_CPU_FEATURES=[${NPY_DISABLE_CPU_FEATURES}]"
+          python3 -c "from numpy._core._multiarray_umath import __cpu_baseline__,__cpu_dispatch__,__cpu_features__; print('numpy baseline:',' '.join(__cpu_baseline__)); print('numpy dispatch enabled:',' '.join(sorted(f for f in __cpu_dispatch__ if __cpu_features__.get(f))))"
           md5sum Urban_Innovation_Model_v5.1.nlogo run_trajectory_v2.py nsga2_config_v5_1_1.json
 
       - name: Configure the run
