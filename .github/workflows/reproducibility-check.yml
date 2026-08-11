@@ -42,7 +42,10 @@ on:
       disable_cpu_features:
         description: 'NPY_DISABLE_CPU_FEATURES (hold every runner to the same SIMD kernels)'
         required: false
-        default: ''
+        # The numpy 2.4.6 wheel dispatches over X86_V3 X86_V4 AVX512_ICL
+        # AVX512_SPR; disabling the upper three leaves every runner on the
+        # AVX2 kernels. Names outside that list are silently ineffective.
+        default: 'X86_V4 AVX512_ICL AVX512_SPR'
 
 jobs:
   rerun:

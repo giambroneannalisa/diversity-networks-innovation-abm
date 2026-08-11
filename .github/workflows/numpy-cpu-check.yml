@@ -26,7 +26,13 @@ on:
       disable_features:
         description: 'NPY_DISABLE_CPU_FEATURES value (empty = numpy default)'
         required: false
-        default: ''
+        # numpy 2.4.6 wheels are built with exactly four dispatch targets:
+        # X86_V3 X86_V4 AVX512_ICL AVX512_SPR. Only those names mean anything
+        # here — a name outside that list (AVX512F, AVX512_SKX, ...) is not
+        # a stricter request, it is a no-op. Disabling the upper three holds
+        # every machine to the X86_V3 (AVX2) kernels, which the whole runner
+        # pool supports.
+        default: 'X86_V4 AVX512_ICL AVX512_SPR'
 
 jobs:
   probe:
