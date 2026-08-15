@@ -53,6 +53,7 @@ jobs:
 
       - name: Probe
         run: |
+          exec > >(tee probe.txt) 2>&1
           echo "replica ${{ matrix.replica }}"
           echo "NPY_DISABLE_CPU_FEATURES=[${NPY_DISABLE_CPU_FEATURES}]"
           grep -m1 'model name' /proc/cpuinfo
@@ -91,4 +92,71 @@ jobs:
                          ("n_gen", 30), seed=789, verbose=False)
           print("nsga2 X digest:", hashlib.sha256(res.X.tobytes()).hexdigest()[:32])
           print("nsga2 F digest:", hashlib.sha256(res.F.tobytes()).hexdigest()[:32])
+          EOF
+
+      - name: Keep this replica's line
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-${{ matrix.replica }}
+          path: probe.txt
+          retention-days: 7
+
+  # One log to read instead of one per replica. With twenty runners per arm,
+  # reading the matrix job by job is the slowest part of the whole diagnosis;
+  # this collapses it to a single table that also states the verdict, so a
+  # reader cannot mistake "all digests agree" for "the pin works" when the
+  # draw happened to contain only one class of CPU.
+  summary:
+    needs: probe
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: probe-*
+          path: results
+
+      - name: Table and verdict
+        run: |
+          python3 - <<'EOF'
+          import glob, os, re, collections
+
+          rows = []
+          for path in sorted(glob.glob("results/probe-*/probe.txt")):
+              text = open(path).read()
+              def field(label, default="?"):
+                  m = re.search(rf"^{re.escape(label)}:?\s*(.*)$", text, re.M)
+                  return m.group(1).strip() if m else default
+              replica = re.search(r"^replica (\S+)", text, re.M)
+              flags = [l for l in text.splitlines() if l.startswith("sse4_2")]
+              rows.append({
+                  "replica": replica.group(1) if replica else "?",
+                  "pin": field("NPY_DISABLE_CPU_FEATURES=[").rstrip("]") or "(none)",
+                  "cpu": field("model name").lstrip(": ").strip(),
+                  "avx512": "yes" if any("avx512f" in f for f in flags) else "no",
+                  "enabled": field("numpy dispatch enabled"),
+                  "power": field("power digest"),
+                  "x": field("nsga2 X digest"),
+              })
+
+          w = max(len(r["cpu"]) for r in rows) if rows else 10
+          print(f"{'rep':>4}  {'cpu':<{w}}  {'avx512':<6}  {'numpy kernels':<28}  nsga2 X digest")
+          for r in sorted(rows, key=lambda r: int(r["replica"])):
+              print(f"{r['replica']:>4}  {r['cpu']:<{w}}  {r['avx512']:<6}  {r['enabled']:<28}  {r['x']}")
+
+          pins = {r["pin"] for r in rows}
+          classes = collections.Counter(r["avx512"] for r in rows)
+          digests = collections.Counter(r["x"] for r in rows)
+          print()
+          print("pin value        :", " | ".join(sorted(pins)))
+          print("hardware classes :", dict(classes))
+          print("distinct digests :", dict(digests))
+          print()
+          if len(classes) < 2:
+              print("VERDICT: INCONCLUSIVE — only one hardware class was drawn, so the")
+              print("pin was never exercised. Identical digests here prove nothing.")
+          elif len(digests) == 1:
+              print("VERDICT: digests identical across BOTH hardware classes.")
+          else:
+              print("VERDICT: digests differ across hardware classes.")
           EOF
