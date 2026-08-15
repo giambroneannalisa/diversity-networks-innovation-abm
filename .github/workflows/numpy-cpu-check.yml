@@ -24,7 +24,7 @@ on:
         required: true
         default: '[1,2,3,4,5,6,7,8]'
       disable_features:
-        description: 'NPY_DISABLE_CPU_FEATURES value (empty = numpy default)'
+        description: "NPY_DISABLE_CPU_FEATURES value, or 'none' for an unpinned control arm"
         required: false
         # numpy 2.4.6 wheels are built with exactly four dispatch targets:
         # X86_V3 X86_V4 AVX512_ICL AVX512_SPR. Only those names mean anything
@@ -38,7 +38,11 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     env:
-      NPY_DISABLE_CPU_FEATURES: ${{ inputs.disable_features }}
+      # An empty dispatch input cannot express "no pin": GitHub substitutes the
+      # default for an empty workflow_dispatch value, so passing '' silently
+      # runs a second treatment arm instead of a control. 'none' is the way to
+      # ask for an unpinned run and mean it.
+      NPY_DISABLE_CPU_FEATURES: ${{ inputs.disable_features == 'none' && '' || inputs.disable_features }}
     strategy:
       fail-fast: false
       matrix:
